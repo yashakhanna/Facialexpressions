@@ -1,0 +1,240 @@
+import pandas as pd
+import numpy as np
+import os
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+data = pd.read_csv("C:/Users/Gursharan Kaur/Downloads/FaceExpressions/data.csv")
+data.head(5)
+Unnamed: 0	path	label
+0	0	Surprise/1bd930d6a1c717c11be33db74823f661cb53f...	Surprise
+1	1	Surprise/cropped_emotions.100096~12fffff.png	Surprise
+2	2	Surprise/0df0e470e33093f5b72a8197fa209d684032c...	Surprise
+3	3	Surprise/cropped_emotions.260779~12fffff.png	Surprise
+4	4	Surprise/cropped_emotions.263616~12fffff.png	Surprise
+data = data.groupby('label').apply(lambda x: x.sample(1000, random_state=40)).reset_index(drop=True)
+image = "C:/Users/Gursharan Kaur/Downloads/FaceExpressions/dataset"
+data['full_path'] = data['path'].apply(lambda x: os.path.join(image,x))  # create the path for each image
+data.head()
+Unnamed: 0	path	label	full_path
+0	5745	Ahegao/lol565~ahegao.png	Ahegao	C:/Users/Gursharan Kaur/Downloads/FaceExpressi...
+1	6312	Ahegao/cropped_emotions.40103~ahegao.png	Ahegao	C:/Users/Gursharan Kaur/Downloads/FaceExpressi...
+2	5414	Ahegao/lol574~ahegao.png	Ahegao	C:/Users/Gursharan Kaur/Downloads/FaceExpressi...
+3	6177	Ahegao/lol305~ahegao.png	Ahegao	C:/Users/Gursharan Kaur/Downloads/FaceExpressi...
+4	5430	Ahegao/lol511~ahegao.png	Ahegao	C:/Users/Gursharan Kaur/Downloads/FaceExpressi...
+import cv2
+
+def image_preprocess(image):
+    grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred_img = cv2.GaussianBlur(grayscale_img , (7,7),0)
+    equalized_img = cv2.equalizeHist(blurred_img)
+    
+    preprocessed_img = cv2.cvtColor(equalized_img , cv2.COLOR_GRAY2BGR)
+    return preprocessed_img
+import matplotlib.pyplot as plt
+import seaborn as sns 
+
+def display_img_comparison(image_path):
+    org_img = cv2.imread(image_path)
+    preprocessed_img = image_preprocess(org_img)
+    
+    plt.figure(figsize=(8,4))
+    plt.subplot(1,2,1)
+    plt.imshow(cv2.cvtColor(org_img ,cv2.COLOR_BGR2RGB))
+    plt.title("Actual Image")
+    plt.axis('off')
+    
+    plt.subplot(1,2,2)
+    plt.imshow(cv2.cvtColor(preprocessed_img , cv2.COLOR_BGR2RGB))
+    plt.title("Preprocessed Image")
+    plt.axis('off')
+    
+    plt.show()   
+    
+sample_img_data = data.groupby('label').apply(lambda x: x.sample(1)).reset_index(drop=True)
+
+for idx, row in sample_img_data.iterrows():
+    print(f"Class: {row['label']}")
+    display_img_comparison(row['full_path'])
+Class: Ahegao
+
+Class: Angry
+
+Class: Happy
+
+Class: Neutral
+
+Class: Sad
+
+Class: Surprise
+
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.applications.vgg16 import VGG16
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Flatten, Dropout, MaxPooling2D , GlobalAveragePooling2D
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping , ModelCheckpoint
+train_data, val_data= train_test_split(data, test_size=0.3, random_state=40)
+Data_generate = ImageDataGenerator(
+      rescale= 1./255,
+      rotation_range = 30,
+      width_shift_range = 0.2,
+      height_shift_range = 0.2,
+      horizontal_flip = True,
+      vertical_flip = True,
+      shear_range = 0.2,
+      zoom_range = 0.2,
+      fill_mode='nearest'
+)
+
+train_gen = Data_generate.flow_from_dataframe(
+    dataframe=train_data,
+    x_col='full_path',
+    y_col='label',
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical'
+)
+
+val_gen = Data_generate.flow_from_dataframe(
+    dataframe=val_data,
+    x_col='full_path',
+    y_col='label',
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical' 
+)
+Found 4200 validated image filenames belonging to 6 classes.
+Found 1800 validated image filenames belonging to 6 classes.
+# Loading the pretrained VGG16 MODEL for ImageNET
+
+Base_model = VGG16(weights='imagenet' , include_top = False , input_shape = (224,224,3))
+
+label = data['label'].values
+num_classes = len(np.unique(label))
+
+# Adding some custom layers/features on the top in the Base MODEL
+features = Base_model.output
+features = GlobalAveragePooling2D()(features)
+features = Dense(1024 , activation = 'relu')(features)
+pred = Dense(num_classes, activation = 'softmax')(features)
+
+model= Model(inputs = Base_model.input , outputs=pred)
+# freezing the initial layers in the VGG16 mOdel
+for layer in Base_model.layers:
+    layer.trainable = False
+    
+model.compile(optimizer = Adam(learning_rate = 0.001) , loss ="categorical_crossentropy" , metrics = ['accuracy'] )
+    
+# Performing the intial training on the pre tarined vgg16 model
+batch_size = 32
+model.fit(
+    train_gen,
+    epochs = 5,
+    validation_data =val_gen,
+    callbacks = EarlyStopping (monitor = 'val_accuracy', patience = 5, mode = 'max')
+)
+Epoch 1/5
+C:\Users\Gursharan Kaur\anaconda3\lib\site-packages\keras\src\trainers\data_adapters\py_dataset_adapter.py:121: UserWarning: Your `PyDataset` class should call `super().__init__(**kwargs)` in its constructor. `**kwargs` can include `workers`, `use_multiprocessing`, `max_queue_size`. Do not pass these arguments to `fit()`, as they will be ignored.
+  self._warn_if_super_not_called()
+132/132 ━━━━━━━━━━━━━━━━━━━━ 939s 7s/step - accuracy: 0.3075 - loss: 1.6390 - val_accuracy: 0.4506 - val_loss: 1.3749
+Epoch 2/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 911s 7s/step - accuracy: 0.4677 - loss: 1.3546 - val_accuracy: 0.4950 - val_loss: 1.3180
+Epoch 3/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1041s 8s/step - accuracy: 0.4946 - loss: 1.2731 - val_accuracy: 0.4878 - val_loss: 1.2855
+Epoch 4/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 916s 7s/step - accuracy: 0.5168 - loss: 1.2229 - val_accuracy: 0.5150 - val_loss: 1.2381
+Epoch 5/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 740s 6s/step - accuracy: 0.5395 - loss: 1.2017 - val_accuracy: 0.4861 - val_loss: 1.2728
+<keras.src.callbacks.history.History at 0x256dbb5dc90>
+for layer in model.layers[-10:]:
+    layer.trainable = True
+
+model.compile(optimizer = Adam(learning_rate=0.0001), loss = 'categorical_crossentropy', metrics = ['accuracy'])
+import time
+checkpoint = ModelCheckpoint('best_model.keras', monitor='val_accuracy', save_best_only=True, mode='max')
+early_stopping = EarlyStopping(monitor='val_accuracy', patience=5, mode='max')
+start_time = time.time()
+history = model.fit(
+    train_gen,
+    epochs=5,
+    validation_data=val_gen,
+    callbacks=[checkpoint, early_stopping]
+)
+
+training_time = time.time() - start_time
+Epoch 1/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1085s 8s/step - accuracy: 0.7406 - loss: 0.6655 - val_accuracy: 0.7222 - val_loss: 0.7499
+Epoch 2/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1237s 9s/step - accuracy: 0.7667 - loss: 0.5790 - val_accuracy: 0.7067 - val_loss: 0.7534
+Epoch 3/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1085s 8s/step - accuracy: 0.8006 - loss: 0.5331 - val_accuracy: 0.7428 - val_loss: 0.6657
+Epoch 4/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1060s 8s/step - accuracy: 0.8009 - loss: 0.5352 - val_accuracy: 0.6811 - val_loss: 0.8255
+Epoch 5/5
+132/132 ━━━━━━━━━━━━━━━━━━━━ 1080s 8s/step - accuracy: 0.7904 - loss: 0.5442 - val_accuracy: 0.7417 - val_loss: 0.6882
+from sklearn.metrics import confusion_matrix , classification_report , roc_auc_score , roc_curve
+
+# Plotting the Accuracy curve 
+plt.figure(figsize = (8,4))
+plt.plot(history.history['accuracy'] , label = "Training Accuracy")
+plt.plot(history.history['val_accuracy'] , label = "Validation Accuracy")
+plt.title(" Accuracu Curve plotted")
+plt.xlabel("EPOCHS")
+plt.ylabel("ACCURACY")
+plt.legend()
+plt.show()
+
+# Generating the Confusion Matrix
+val_images, val_labels = next(val_gen)
+y_true = np.argmax(val_labels, axis=1)
+y_pred_prob = model.predict(val_images)
+y_pred_classes = np.argmax(y_pred_prob, axis=1)
+
+
+conf_matrix = confusion_matrix(y_true, y_pred_classes)
+plt.figure(figsize=(10, 7))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.show()
+
+print(classification_report(y_true, y_pred_classes))
+1/1 ━━━━━━━━━━━━━━━━━━━━ 3s 3s/step
+
+              precision    recall  f1-score   support
+
+           0       0.50      1.00      0.67         2
+           1       0.80      1.00      0.89         8
+           2       1.00      1.00      1.00         4
+           3       0.60      0.43      0.50         7
+           4       0.25      0.33      0.29         3
+           5       0.60      0.38      0.46         8
+
+    accuracy                           0.66        32
+   macro avg       0.62      0.69      0.63        32
+weighted avg       0.66      0.66      0.64        32
+
+n_classes = len(train_data['label'].unique())
+false_positive_rate = dict()
+true_positive_rate = dict()
+roc_auc = dict()
+for i in range(n_classes):
+    false_positive_rate [i], true_positive_rate [i], _ = roc_curve(y_true, y_pred_prob[:, i], pos_label=i)
+    roc_auc[i] = roc_auc_score(y_true == i, y_pred_prob[:, i])
+
+plt.figure(figsize=(10, 7))
+for i in range(n_classes):
+    plt.plot(false_positive_rate [i], true_positive_rate [i], label=f'Class {i} (AUC = {roc_auc[i]:.2f})')
+plt.plot([0, 1], [0, 1], 'k--') 
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve plotted')
+plt.legend(loc='lower right')
+plt.show()
+
+print(f'Training time is : {training_time} seconds')
+Training time is : 5547.285315275192 seconds
+ 
